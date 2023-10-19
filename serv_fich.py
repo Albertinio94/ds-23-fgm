@@ -134,6 +134,8 @@ def session( s ):
 				sendER( s, 7 )
 				continue
 			try:
+				print(message)
+				print(os.path.join( FILES_PATH, message[4:]))
 				os.remove( os.path.join( FILES_PATH, message[4:] ) )
 			except:
 				sendER( s, 11 )
