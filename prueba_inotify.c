@@ -12,13 +12,14 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #define EVENT_SIZE (sizeof(struct inotify_event))
 // #define EVENT_SIZE  (3*sizeof(uint32_t)+sizeof(int))
 #define EVENT_BUF_LEN (1024 * (EVENT_SIZE + 16))
 #define TESTIGO_NAME "inotify.example.executing"
 
-#define PORT 7778
+#define PORT 7777
 
 #define UPLOAD '3'
 #define DELETE '4'
@@ -33,22 +34,23 @@ void send_through_socket(int socket, char command, const char buffer[1024])
   send(socket, message, strlen(message), 0);
 }
 
-void listen_through_socket(int socket, char command)
+void listen_through_socket(int socket)
 {
   char message[1024];
   char response_code[3];
   recv(socket, message, sizeof(message), 0);
   memcpy(response_code, message, 2);
-  if (strcmp("ER", response_code))
+  if (strncmp("ER", response_code, 2) == 0)
   {
-    fprintf(stderr, "Se ha procudido un error ejecutando el comando %c", command);
+    fprintf(stderr, "Se ha procudido un error ejecutando el comando. Respuesta: %s asdfasdf\n", message);
   }
 }
 
 unsigned char compare_strings(const char *s1, const char *s2)
 {
+  int min_length = strlen(s1) < strlen(s2) ? strlen(s1) : strlen(s2);
   unsigned char return_value = 0;
-  for (int i = 0; i < strlen(s1); i++)
+  for (int i = 0; i < min_length; i++)
   {
     if (s1[i] != s2[i])
     {
@@ -58,6 +60,14 @@ unsigned char compare_strings(const char *s1, const char *s2)
   }
 
   return return_value;
+}
+
+int is_regular_file(const char *path)
+{
+  struct stat path_stat;
+  stat(path, &path_stat);
+
+  return S_ISREG(path_stat.st_mode);
 }
 
 int main(int argc, char *argv[])
@@ -70,6 +80,7 @@ int main(int argc, char *argv[])
   char testigo[1024];
   char evento[1024];
   char file_path[1024];
+  char folder_path[1024];
   int clientSocket;
   struct sockaddr_in serverAddr;
   char socket_buffer[1024];
@@ -123,8 +134,9 @@ int main(int argc, char *argv[])
   strcpy(testigo, argv[1]);
   strcat(testigo, "/");
   strcat(testigo, TESTIGO_NAME);
-  mkdir(testigo);
+  mkdir(testigo, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
   fprintf(stderr, "---Para salir, borrar %s/%s\n", argv[1], testigo);
+  realpath(argv[1], folder_path);
 
   /*read to determine the event change happens on the directory. Actually this read blocks until the change event occurs*/
   struct inotify_event event_st, *event;
@@ -155,33 +167,38 @@ int main(int argc, char *argv[])
       //    memcpy(event, buffer, length);
       if (event->len)
       {
+        sprintf(file_path, "%s/%s", folder_path, event->name);
         //      memcpy(event+EVENT_SIZE, buffer+EVENT_SIZE, length);
-        if (event->mask & IN_CREATE & ~IN_ISDIR)
+        if (event->mask & IN_CREATE && is_regular_file(file_path))
         {
           fprintf(stderr, "---%s: New file %s created.\n", argv[0], event->name);
           sprintf(evento, "3\n%s\n", event->name);
           write(1, evento, strlen(evento));
           //            printf("3\n%s\n", event->name );
+          send_through_socket(clientSocket, UPLOAD, file_path);
+          listen_through_socket(clientSocket);
         }
         else if (event->mask & IN_DELETE)
         {
-          if (compare_strings(event->name, TESTIGO_NAME) == 0)
+          if (strcmp(event->name, TESTIGO_NAME) == 0)
           {
             exiting = 1;
           }
-          else if (event->mask & ~IN_ISDIR)
+          else if (is_regular_file(file_path))
           {
             fprintf(stderr, "---%s: File %s deleted.\n", argv[0], event->name);
             sprintf(evento, "4\n%s\n", event->name);
+            send_through_socket(clientSocket, DELETE, file_path);
+            listen_through_socket(clientSocket);
             write(1, evento, strlen(evento));
           }
         }
-        else if (event->mask & IN_CLOSE_WRITE & ~IN_ISDIR)
+        else if (event->mask & IN_CLOSE_WRITE && is_regular_file(file_path))
         {
           fprintf(stderr, "---%s: file %s updated.\n", argv[0], event->name);
           sprintf(evento, "3\n%s\n", event->name);
-          realpath(event->name, file_path);
-          sprintf(evento, "3\n%s\n", file_path);
+          send_through_socket(clientSocket, UPLOAD, file_path);
+          listen_through_socket(clientSocket);
           write(1, evento, strlen(evento));
         }
       }
@@ -204,6 +221,8 @@ int main(int argc, char *argv[])
   //  rmdir(argv[1]);
 
   /*closing the INOTIFY instance*/
+  send_through_socket(clientSocket, EXIT, "");
+  listen_through_socket(clientSocket);
   close(fd);
   close(clientSocket);
 }

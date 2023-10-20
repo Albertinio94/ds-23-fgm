@@ -6,7 +6,7 @@ import szasar
 FILES_SERVER = 'localhost'
 INOTIFY_HOST = 'localhost'
 FILES_PORT = 6012
-INOTIFY_PORT = 7778
+INOTIFY_PORT = 7777
 Options = ( "Lista de ficheros", "Bajar fichero", "Subir fichero", "Borrar fichero", "Salir" )
 List, Download, Upload, Delete, Exit = range( 1, 6 )
 ER_MSG = (
