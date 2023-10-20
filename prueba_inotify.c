@@ -13,12 +13,52 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#define EVENT_SIZE  ( sizeof (struct inotify_event) )
-//#define EVENT_SIZE  (3*sizeof(uint32_t)+sizeof(int))
-#define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
+#define EVENT_SIZE (sizeof(struct inotify_event))
+// #define EVENT_SIZE  (3*sizeof(uint32_t)+sizeof(int))
+#define EVENT_BUF_LEN (1024 * (EVENT_SIZE + 16))
 #define TESTIGO_NAME "inotify.example.executing"
 
-#define PORT 7777
+#define PORT 7778
+
+#define UPLOAD '3'
+#define DELETE '4'
+#define EXIT '5'
+
+void send_through_socket(int socket, char command, const char buffer[1024])
+{
+  char message[1024];
+  message[0] = command;
+  message[1] = '\0';
+  strcat(message, buffer);
+  send(socket, message, strlen(message), 0);
+}
+
+void listen_through_socket(int socket, char command)
+{
+  char message[1024];
+  char response_code[3];
+  recv(socket, message, sizeof(message), 0);
+  memcpy(response_code, message, 2);
+  if (strcmp("ER", response_code))
+  {
+    fprintf(stderr, "Se ha procudido un error ejecutando el comando %c", command);
+  }
+}
+
+unsigned char compare_strings(const char *s1, const char *s2)
+{
+  unsigned char return_value = 0;
+  for (int i = 0; i < strlen(s1); i++)
+  {
+    if (s1[i] != s2[i])
+    {
+      return_value = 1;
+      break;
+    }
+  }
+
+  return return_value;
+}
 
 int main(int argc, char *argv[])
 {
@@ -29,127 +69,141 @@ int main(int argc, char *argv[])
   char buffer[EVENT_BUF_LEN];
   char testigo[1024];
   char evento[1024];
+  char file_path[1024];
   int clientSocket;
   struct sockaddr_in serverAddr;
   char socket_buffer[1024];
 
   clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-  if (clientSocket == -1) {
-      perror("Error creating socket");
-      exit(EXIT_FAILURE);
+  if (clientSocket == -1)
+  {
+    perror("Error creating socket");
+    exit(EXIT_FAILURE);
   }
 
   // Configure server details
   serverAddr.sin_family = AF_INET;
-  serverAddr.sin_port = htons(PORT); 
-  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+  serverAddr.sin_port = htons(PORT);
+  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-  if (argc!=2) {
-      fprintf(stderr, "Uso: %s Directorio_a_monitorizar\n", argv[0]);
-      exit(1);
+  if (argc != 2)
+  {
+    fprintf(stderr, "Uso: %s Directorio_a_monitorizar\n", argv[0]);
+    exit(1);
   }
 
-//  fprintf(stderr, "---Prueba de inotify sobre %s\n", argv[1]);
-//  fprintf(stderr, "---Notifica crear/borrar ficheros/directorios sobre %s\n", argv[1]);
-//  fprintf(stderr, "---%s debe exixtir!\n", argv[1]);
-
-
+  if (connect(clientSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+  {
+    perror("Error connecting");
+    close(clientSocket);
+    exit(EXIT_FAILURE);
+  }
+  //  fprintf(stderr, "---Prueba de inotify sobre %s\n", argv[1]);
+  //  fprintf(stderr, "---Notifica crear/borrar ficheros/directorios sobre %s\n", argv[1]);
+  //  fprintf(stderr, "---%s debe exixtir!\n", argv[1]);
 
   /*creating the INOTIFY instance*/
   fd = inotify_init();
 
   /*checking for error*/
-  if ( fd < 0 ) {
-    perror( "inotify_init" );
+  if (fd < 0)
+  {
+    perror("inotify_init");
   }
 
   /*adding the /tmp directory into watch list. Here, the suggestion is to validate the existence of the directory before adding into monitoring list.*/
-//  wd = inotify_add_watch( fd, "/tmp", IN_CREATE | IN_DELETE );
+  //  wd = inotify_add_watch( fd, "/tmp", IN_CREATE | IN_DELETE );
 
   /* Monitorizamos el directorio indicado como argumento. Debe estar creado. */
-//  mkdir(argv[1]);
-  wd_cd = inotify_add_watch( fd, argv[1], IN_CREATE | IN_DELETE );
+  //  mkdir(argv[1]);
+  wd_cd = inotify_add_watch(fd, argv[1], IN_CREATE | IN_CLOSE_WRITE | IN_DELETE);
 
   /* Testigo para finalizar cuando lo borremos: */
-  
+
   strcpy(testigo, argv[1]);
   strcat(testigo, "/");
   strcat(testigo, TESTIGO_NAME);
   mkdir(testigo);
-  fprintf(stderr, "---Para salir, borrar %s/%s\n", argv[1], testigo); 
+  fprintf(stderr, "---Para salir, borrar %s/%s\n", argv[1], testigo);
 
-
-  /*read to determine the event change happens on the directory. Actually this read blocks until the change event occurs*/ 
+  /*read to determine the event change happens on the directory. Actually this read blocks until the change event occurs*/
   struct inotify_event event_st, *event;
-  int k=0;
-  int exiting= 0;
+  int k = 0;
+  int exiting = 0;
 
-// printf("%s\n", argv[2]);
-// printf("%s\n", argv[3]);
+  // printf("%s\n", argv[2]);
+  // printf("%s\n", argv[3]);
   write(1, "1\n", 2);
 
-  while (!exiting) {
-    fprintf(stderr, "---%s: waiting for event %d...\n", argv[0], ++k); 
-    length = read( fd, buffer, EVENT_BUF_LEN ); 
-    fprintf(stderr, "---%s: event %d read.\n", argv[0], k); 
+  while (!exiting)
+  {
+    fprintf(stderr, "---%s: waiting for event %d...\n", argv[0], ++k);
+    length = read(fd, buffer, EVENT_BUF_LEN);
+    fprintf(stderr, "---%s: event %d read.\n", argv[0], k);
     /*checking for error*/
-    if ( length < 0 ) {
-      perror( "read" );
+    if (length < 0)
+    {
+      perror("read");
       break;
     }
-//    struct inotify_event *event = ( struct inotify_event * ) &buffer[ i ];
-    while ( (i < length) && !exiting ) {
-//    event= &event_st;
-      event = ( struct inotify_event * ) &buffer[ i ];
-//    fprintf(stderr, "---example: event name length: %i\n", event->len);
-//    memcpy(event, buffer, length);
-      if ( event->len ) {
-//      memcpy(event+EVENT_SIZE, buffer+EVENT_SIZE, length);
-        if ( event->mask & IN_CREATE ) {
-          if ( event->mask & IN_ISDIR ) {	// event: directory created
-            fprintf(stderr, "---%s: New directory %s created.\n", argv[0], event->name );
+    //    struct inotify_event *event = ( struct inotify_event * ) &buffer[ i ];
+    while ((i < length) && !exiting)
+    {
+      //    event= &event_st;
+      event = (struct inotify_event *)&buffer[i];
+      //    fprintf(stderr, "---example: event name length: %i\n", event->len);
+      //    memcpy(event, buffer, length);
+      if (event->len)
+      {
+        //      memcpy(event+EVENT_SIZE, buffer+EVENT_SIZE, length);
+        if (event->mask & IN_CREATE & ~IN_ISDIR)
+        {
+          fprintf(stderr, "---%s: New file %s created.\n", argv[0], event->name);
+          sprintf(evento, "3\n%s\n", event->name);
+          write(1, evento, strlen(evento));
+          //            printf("3\n%s\n", event->name );
+        }
+        else if (event->mask & IN_DELETE)
+        {
+          if (compare_strings(event->name, TESTIGO_NAME) == 0)
+          {
+            exiting = 1;
           }
-          else {	// event: fie created
-            fprintf(stderr, "---%s: New file %s created.\n", argv[0], event->name );
-            sprintf(evento, "3\n%s\n", event->name );
+          else if (event->mask & ~IN_ISDIR)
+          {
+            fprintf(stderr, "---%s: File %s deleted.\n", argv[0], event->name);
+            sprintf(evento, "4\n%s\n", event->name);
             write(1, evento, strlen(evento));
-//            printf("3\n%s\n", event->name );
           }
         }
-        else if ( event->mask & IN_DELETE ) {
-          if ( event->mask & IN_ISDIR ) {	// event: directory removed
-            if (!strcmp(event->name, TESTIGO_NAME)) {
-              exiting= 1;
-//              break;
-            }
-            fprintf( stderr, "---%s: Directory %s deleted.\n", argv[0], event->name );
-          }
-          else {	// event: file removed
-            fprintf(stderr, "---%s: File %s deleted.\n", argv[0], event->name );
-            sprintf(evento, "4\n%s\n", event->name );
-            write(1, evento, strlen(evento));
-//            printf("4\n%s\n", event->name );
-          }
+        else if (event->mask & IN_CLOSE_WRITE & ~IN_ISDIR)
+        {
+          fprintf(stderr, "---%s: file %s updated.\n", argv[0], event->name);
+          sprintf(evento, "3\n%s\n", event->name);
+          realpath(event->name, file_path);
+          sprintf(evento, "3\n%s\n", file_path);
+          write(1, evento, strlen(evento));
         }
       }
-      else {	// event ignored
-        fprintf(stderr, "---%s: event ignored for %s\n", argv[0], event->name); 
+      else
+      { // event ignored
+        fprintf(stderr, "---%s: event ignored for %s\n", argv[0], event->name);
       }
       i += EVENT_SIZE + event->len;
-//    fprintf(stderr, "---example.event count: %i\n", i); 
+      //    fprintf(stderr, "---example.event count: %i\n", i);
     }
-    i= 0;
+    i = 0;
   }
 
   fprintf(stderr, "---Exiting %s\n", argv[0]);
   write(1, "5\n", 2);
-//  printf("5\n"); 
- /*removing the directory from the watch list.*/
-  inotify_rm_watch( fd, wd );
-  inotify_rm_watch( fd, wd_cd );
-//  rmdir(argv[1]);
+  //  printf("5\n");
+  /*removing the directory from the watch list.*/
+  inotify_rm_watch(fd, wd);
+  inotify_rm_watch(fd, wd_cd);
+  //  rmdir(argv[1]);
 
- /*closing the INOTIFY instance*/
-  close( fd );
-
+  /*closing the INOTIFY instance*/
+  close(fd);
+  close(clientSocket);
 }
